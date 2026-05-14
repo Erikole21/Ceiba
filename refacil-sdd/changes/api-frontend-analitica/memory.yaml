@@ -1,0 +1,26 @@
+lastStep: apply
+touchedFiles:
+  - docs/api-frontend-analitica/overview.md
+  - docs/api-frontend-analitica/api-gateway.md
+  - docs/api-frontend-analitica/adr-api-gateway.md
+  - docs/api-frontend-analitica/adr-realtime-protocol.md
+  - docs/api-frontend-analitica/adr-cartography.md
+  - docs/api-frontend-analitica/search-service.md
+  - docs/api-frontend-analitica/alerts-service.md
+  - docs/api-frontend-analitica/incident-service.md
+  - docs/api-frontend-analitica/analytics-service.md
+  - docs/api-frontend-analitica/devices-service.md
+  - docs/api-frontend-analitica/vehicles-service.md
+  - docs/api-frontend-analitica/webapp-architecture.md
+  - docs/api-frontend-analitica/superset-integration.md
+  - docs/api-frontend-analitica/slo-observability.md
+  - docs/api-frontend-analitica/helm/README.md
+  - docs/api-frontend-analitica/terraform/README.md
+  - docs/api-frontend-analitica/openapi/search-service.yaml
+  - docs/api-frontend-analitica/openapi/alerts-service.yaml
+  - docs/api-frontend-analitica/openapi/incident-service.yaml
+  - docs/api-frontend-analitica/openapi/analytics-service.yaml
+  - docs/api-frontend-analitica/openapi/devices-service.yaml
+  - docs/api-frontend-analitica/openapi/vehicles-service.yaml
+  - docs/propuesta-arquitectura-hurto-vehiculos.md
+  - docs/almacenamiento-lectura/overview.md

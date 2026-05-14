@@ -1,0 +1,280 @@
+openapi: "3.1.0"
+info:
+  title: alerts-service API
+  version: "1.0.0"
+  description: |
+    Servicio de alertas en tiempo real. Distribuye alertas de vehículos hurtados vía
+    WebSocket (Socket.IO) a oficiales de policía según su zona. También expone un
+    endpoint REST para recuperar alertas históricas (reconexión).
+
+    ## Protocolo WebSocket (Socket.IO)
+
+    **Endpoint WebSocket:** `wss://api.anti-hurto.internal/alerts/socket.io`
+
+    ### Autenticación
+    El cliente envía el JWT en el query parameter `token` al conectar:
+    ```
+    const socket = io('wss://api.anti-hurto.internal/alerts', {
+      auth: { token: jwtToken },
+      transports: ['websocket', 'polling']
+    });
+    ```
+
+    ### Eventos del servidor al cliente
+    - `vehicle.alert` — nueva alerta de vehículo hurtado detectado en la zona del oficial.
+      Payload: schema `Alert`.
+
+    ### Eventos del cliente al servidor
+    - `authenticate` — re-autenticación tras reconexión. Payload: `{ token: string }`.
+    - `ack` — confirmación de recepción de alerta. Payload: `{ alert_id: string }`.
+
+    ### Manejo de reconexión
+    Socket.IO reconnects automáticamente con backoff exponencial. Al reconectar, el
+    cliente debe llamar a `GET /v1/alerts?since={last_received_at}` para recuperar
+    alertas perdidas durante el gap de conectividad.
+
+    ### Rooms
+    Cada conexión autenticada se une automáticamente al room `{country_code}:{zone}`
+    (ej. `CO:BOG-NORTE`). El servidor emite a este room al recibir alertas de Kafka.
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción REST (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /alerts:
+    get:
+      summary: Obtener alertas históricas
+      description: |
+        Retorna alertas recientes para la zona del oficial. Usado principalmente al
+        reconectarse para recuperar alertas perdidas durante el gap de conectividad.
+        Fuente de datos: tópico Kafka vehicle.alerts (retención 7 días).
+      operationId: getAlerts
+      tags:
+        - alerts
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: "Alertas desde este timestamp (ISO 8601). Default: 1 hora atrás."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-13T13:30:00Z"
+        - name: country
+          in: query
+          required: false
+          description: "Override de country_code. Solo role=admin."
+          schema:
+            type: string
+            pattern: "^[A-Z]{2}$"
+            example: "CO"
+        - name: zone
+          in: query
+          required: false
+          description: "Zona específica. Default: zona del token."
+          schema:
+            type: string
+            example: "BOG-NORTE"
+        - name: limit
+          in: query
+          required: false
+          description: "Máximo de alertas. Default: 50. Máximo: 500."
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 50
+      responses:
+        "200":
+          description: Lista de alertas históricas.
+          headers:
+            X-Trace-ID:
+              description: OpenTelemetry trace ID.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlertsResponse"
+              example:
+                data:
+                  - alert_id: "alrt-2026-05-13-co-abc123-001"
+                    plate: "ABC123"
+                    country_code: "CO"
+                    zone: "BOG-NORTE"
+                    lat: 4.710989
+                    lon: -74.072092
+                    device_id: "dev-bog-norte-042"
+                    confidence: 0.94
+                    thumbnail_url: "https://minio.anti-hurto.internal/thumbnails/2026/05/13/abc123-004.jpg?X-Amz-Expires=300&X-Amz-Signature=..."
+                    vehicle_brand: "Chevrolet"
+                    vehicle_color: "Rojo"
+                    vehicle_model: "2019"
+                    incident_id: "inc-abc123-2026-05"
+                    stolen_since: "2026-04-28T09:15:00Z"
+                    produced_at: "2026-05-13T14:32:08.001Z"
+                total: 1
+                since: "2026-05-13T13:30:00Z"
+        "401":
+          description: No autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: No autorizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT emitido por Keycloak (RS256). Para WebSocket, el token se envía en
+        el auth object de Socket.IO: `{ auth: { token: jwtToken } }`.
+
+  schemas:
+    Alert:
+      type: object
+      required:
+        - alert_id
+        - plate
+        - country_code
+        - zone
+        - lat
+        - lon
+        - confidence
+        - produced_at
+      description: |
+        Payload de alerta de vehículo hurtado. Este schema es el payload del evento
+        WebSocket `vehicle.alert` Y el elemento del array en la respuesta REST.
+      properties:
+        alert_id:
+          type: string
+          description: ID único de la alerta.
+          example: "alrt-2026-05-13-co-abc123-001"
+        plate:
+          type: string
+          description: Matrícula normalizada del vehículo hurtado.
+          example: "ABC123"
+        event_id:
+          type: ["string", "null"]
+          description: Referencia al evento de avistamiento.
+          example: "evt-2026-05-13-co-abc123-004"
+        country_code:
+          type: string
+          description: country_code del tenant (ISO 3166-1 alpha-2).
+          example: "CO"
+        zone:
+          type: string
+          description: Zona donde se detectó el vehículo.
+          example: "BOG-NORTE"
+        lat:
+          type: number
+          format: double
+          description: Latitud del avistamiento (WGS84).
+          example: 4.710989
+        lon:
+          type: number
+          format: double
+          description: Longitud del avistamiento (WGS84).
+          example: -74.072092
+        device_id:
+          type: ["string", "null"]
+          description: Dispositivo captura.
+          example: "dev-bog-norte-042"
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confianza del ANPR.
+          example: 0.94
+        thumbnail_url:
+          type: ["string", "null"]
+          format: uri
+          description: URL pre-firmada del thumbnail (TTL 5 min).
+          example: "https://minio.anti-hurto.internal/thumbnails/2026/05/13/abc123-004.jpg?X-Amz-Expires=300&X-Amz-Signature=..."
+        vehicle_brand:
+          type: ["string", "null"]
+          description: Marca del vehículo hurtado.
+          example: "Chevrolet"
+        vehicle_color:
+          type: ["string", "null"]
+          description: Color del vehículo.
+          example: "Rojo"
+        vehicle_model:
+          type: ["string", "null"]
+          description: Año modelo del vehículo.
+          example: "2019"
+        incident_id:
+          type: ["string", "null"]
+          description: ID del incidente activo.
+          example: "inc-abc123-2026-05"
+        stolen_since:
+          type: ["string", "null"]
+          format: date-time
+          description: Fecha de hurto del vehículo.
+          example: "2026-04-28T09:15:00Z"
+        produced_at:
+          type: string
+          format: date-time
+          description: Timestamp de producción en el tópico Kafka.
+          example: "2026-05-13T14:32:08.001Z"
+
+    AlertsResponse:
+      type: object
+      required:
+        - data
+        - total
+        - since
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Alert"
+          description: Lista de alertas ordenadas por event_timestamp (produced_at) ASC — más antiguas primero para permitir al cliente procesar en orden cronológico.
+        total:
+          type: integer
+          description: Total de alertas en el rango (antes de aplicar limit).
+          example: 3
+        since:
+          type: string
+          format: date-time
+          description: Timestamp de inicio del rango consultado.
+          example: "2026-05-13T13:30:00Z"
+        truncated:
+          type: boolean
+          description: |
+            true si el número de alertas en el rango superó el límite configurado (máximo 500)
+            y la respuesta fue truncada. El cliente debe ajustar el rango de consulta o paginar
+            reduciendo el intervalo de `since` para recuperar todas las alertas.
+          example: false
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          example: "unauthorized"
+        message:
+          type: string
+          example: "JWT ausente, inválido o expirado."
+        trace_id:
+          type: string
+          example: "7c3f1a2b9d4e5f6a"

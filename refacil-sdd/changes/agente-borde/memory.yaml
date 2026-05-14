@@ -1,0 +1,15 @@
+lastStep: apply
+touchedFiles:
+  - docs/agente-borde/overview.md
+  - docs/agente-borde/anpr-adapter-spi.md
+  - docs/agente-borde/collector.md
+  - docs/agente-borde/bloom-filter.md
+  - docs/agente-borde/queue-manager.md
+  - docs/agente-borde/image-store.md
+  - docs/agente-borde/uploader.md
+  - docs/agente-borde/health-beacon.md
+  - docs/agente-borde/config-ota-manager.md
+  - docs/agente-borde/watchdog.md
+  - docs/agente-borde/security.md
+  - docs/agente-borde/adr-local.md
+  - docs/propuesta-arquitectura-hurto-vehiculos.md

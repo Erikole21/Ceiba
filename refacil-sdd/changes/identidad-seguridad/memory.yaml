@@ -1,0 +1,23 @@
+lastStep: apply
+touchedFiles:
+  - docs/identidad-seguridad/overview.md
+  - docs/identidad-seguridad/adr-realm-por-pais.md
+  - docs/identidad-seguridad/adr-vault-pki.md
+  - docs/identidad-seguridad/adr-spi-cache.md
+  - docs/identidad-seguridad/jwt-claims-schema.md
+  - docs/identidad-seguridad/keycloak-realm-model.md
+  - docs/identidad-seguridad/federation-ldap.md
+  - docs/identidad-seguridad/federation-jdbc.md
+  - docs/identidad-seguridad/federation-spi-custom.md
+  - docs/identidad-seguridad/federation-saml-oidc.md
+  - docs/identidad-seguridad/vault-pki-device.md
+  - docs/identidad-seguridad/vault-secrets-engine.md
+  - docs/identidad-seguridad/vault-ha-unseal.md
+  - docs/identidad-seguridad/rbac-model.md
+  - docs/identidad-seguridad/mtls-device-policy.md
+  - docs/identidad-seguridad/multitenancy-security.md
+  - docs/identidad-seguridad/audit-authentication.md
+  - docs/identidad-seguridad/onboarding-nuevo-pais.md
+  - docs/identidad-seguridad/helm/README.md
+  - docs/identidad-seguridad/terraform/README.md
+  - docs/propuesta-arquitectura-hurto-vehiculos.md

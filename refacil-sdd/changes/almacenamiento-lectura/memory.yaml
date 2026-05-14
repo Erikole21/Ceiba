@@ -1,0 +1,21 @@
+lastStep: verify
+touchedFiles:
+  - docs/almacenamiento-lectura/overview.md
+  - docs/almacenamiento-lectura/adr-postgresql-partitioning.md
+  - docs/almacenamiento-lectura/adr-clickhouse-ingestion.md
+  - docs/almacenamiento-lectura/adr-redis-topology.md
+  - docs/almacenamiento-lectura/postgresql-schema.md
+  - docs/almacenamiento-lectura/postgresql-ha.md
+  - docs/almacenamiento-lectura/debezium-cdc.md
+  - docs/almacenamiento-lectura/opensearch-schema.md
+  - docs/almacenamiento-lectura/opensearch-ilm.md
+  - docs/almacenamiento-lectura/clickhouse-schema.md
+  - docs/almacenamiento-lectura/clickhouse-h3-views.md
+  - docs/almacenamiento-lectura/redis-schema.md
+  - docs/almacenamiento-lectura/data-lifecycle.md
+  - docs/almacenamiento-lectura/slo-observability.md
+  - docs/almacenamiento-lectura/helm/README.md
+  - docs/almacenamiento-lectura/terraform/README.md
+  - docs/backbone-procesamiento/postgresql-schema.md
+  - docs/backbone-procesamiento/opensearch-schema.md
+  - docs/propuesta-arquitectura-hurto-vehiculos.md

@@ -1,0 +1,14 @@
+lastStep: apply
+touchedFiles:
+  - docs/ingestion-mqtt/overview.md
+  - docs/ingestion-mqtt/topic-schema.md
+  - docs/ingestion-mqtt/adr-bridge-decision.md
+  - docs/ingestion-mqtt/emqx-cluster.md
+  - docs/ingestion-mqtt/upload-service.md
+  - docs/ingestion-mqtt/object-storage.md
+  - docs/ingestion-mqtt/bridge.md
+  - docs/ingestion-mqtt/security.md
+  - docs/ingestion-mqtt/operations.md
+  - docs/ingestion-mqtt/helm/README.md
+  - docs/ingestion-mqtt/terraform/README.md
+  - docs/propuesta-arquitectura-hurto-vehiculos.md

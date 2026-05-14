@@ -1,0 +1,476 @@
+openapi: "3.1.0"
+info:
+  title: vehicles-service API
+  version: "1.0.0"
+  description: |
+    CRUD de vehículos hurtados sobre la tabla canónica stolen_vehicles.
+    Restricción: escrituras solo para role=admin.
+    Coordina invalidación de cache Redis en cada escritura.
+    Referencia: docs/api-frontend-analitica/vehicles-service.md
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /vehicles:
+    get:
+      summary: Listar vehículos hurtados del tenant
+      description: |
+        Retorna la lista paginada de vehículos hurtados del country_code del token.
+        Roles permitidos: admin, supervisor.
+      operationId: listVehicles
+      tags:
+        - vehicles
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: "Filtrar por estado. Default: stolen."
+          schema:
+            type: string
+            enum: ["stolen", "recovered", "cancelled"]
+            default: "stolen"
+        - name: brand
+          in: query
+          required: false
+          description: Filtrar por marca.
+          schema:
+            type: string
+            example: "Chevrolet"
+        - name: plate
+          in: query
+          required: false
+          description: Búsqueda por matrícula (parcial o completa).
+          schema:
+            type: string
+            example: "ABC"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Lista de vehículos hurtados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VehiclesListResponse"
+              example:
+                data:
+                  - plate: "ABC-123"
+                    plate_normalized: "ABC123"
+                    country_code: "CO"
+                    theft_date: "2026-04-28"
+                    theft_location: "Carrera 15 # 93-47, Chapinero, Bogotá"
+                    brand: "Chevrolet"
+                    vehicle_class: "automóvil"
+                    line: "Tracker"
+                    color: "Rojo"
+                    model_year: 2019
+                    status: "stolen"
+                    schema_version: 2
+                    source: "manual_admin"
+                    created_at: "2026-04-28T10:15:00.000Z"
+                    updated_at: "2026-05-02T08:30:00.000Z"
+                total: 1847
+                page: 1
+                page_size: 20
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      summary: Registrar vehículo hurtado manualmente
+      description: |
+        Crea un nuevo registro en stolen_vehicles. El owner_dni se recibe en claro
+        pero se almacena como HMAC-SHA256 con sal por país (nunca en claro).
+        Coordina actualización de cache Redis stolen:{cc}:{plate}.
+        Roles permitidos: admin.
+      operationId: createVehicle
+      tags:
+        - vehicles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateVehicleRequest"
+            example:
+              plate: "XYZ-789"
+              theft_date: "2026-05-13"
+              theft_location: "Autopista Norte km 15, Bogotá"
+              owner_dni: "79012345"
+              brand: "Toyota"
+              vehicle_class: "automóvil"
+              line: "Corolla"
+              color: "Blanco"
+              model_year: 2022
+              extensions:
+                soat_number: "CO-SOAT-2026-XYZ789"
+                internal_case_id: "BOG-2026-04521"
+      responses:
+        "201":
+          description: Vehículo registrado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StolenVehicle"
+              example:
+                plate: "XYZ789"
+                plate_normalized: "XYZ789"
+                country_code: "CO"
+                status: "stolen"
+                schema_version: 1
+                source: "manual_admin"
+                created_at: "2026-05-13T14:45:00.000Z"
+        "400":
+          description: Datos inválidos o faltantes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_plate:
+                  value:
+                    error: "invalid_plate_format"
+                    message: "Formato de matrícula no reconocido."
+                    trace_id: "4bf92f3577b34da6"
+                missing_fields:
+                  value:
+                    error: "missing_required_fields"
+                    message: "Los campos theft_date, brand y vehicle_class son obligatorios."
+                    trace_id: "4bf92f3577b34da6"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No aplica para POST.
+        "409":
+          description: Matrícula ya existe como stolen en el país.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "plate_already_exists"
+                message: "La matrícula XYZ789 ya está registrada como stolen en CO."
+                trace_id: "4bf92f3577b34da6"
+
+  /vehicles/{id}:
+    patch:
+      summary: Actualizar registro de vehículo hurtado
+      description: |
+        Actualiza campos de un registro existente. Incrementa schema_version en 1.
+        Genera entry en audit_log. Coordina invalidación de cache Redis.
+        Roles permitidos: admin.
+      operationId: updateVehicle
+      tags:
+        - vehicles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: plate_normalized del vehículo (ej. ABC123).
+          schema:
+            type: string
+            example: "XYZ789"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VehiclePatch"
+            examples:
+              mark_recovered:
+                summary: Marcar como recuperado
+                value:
+                  status: "recovered"
+                  extensions:
+                    recovery_date: "2026-05-13"
+                    recovery_notes: "Recuperado por patrulla BOG-N-042 en Carrera 30."
+              correct_color:
+                summary: Corregir color
+                value:
+                  color: "Azul"
+      responses:
+        "200":
+          description: Registro actualizado exitosamente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plate_normalized:
+                    type: string
+                    example: "XYZ789"
+                  country_code:
+                    type: string
+                    example: "CO"
+                  status:
+                    type: string
+                    enum: ["stolen", "recovered", "cancelled"]
+                    example: "recovered"
+                  schema_version:
+                    type: integer
+                    example: 2
+                  updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-05-13T15:00:00.000Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Vehículo no encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "vehicle_not_found"
+                message: "No se encontró el vehículo XYZ789 en el país CO."
+                trace_id: "4bf92f3577b34da6"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: JWT ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: No autorizado. Escrituras requieren role=admin.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "forbidden_role"
+            message: "Solo role=admin puede realizar escrituras en vehicles-service."
+            trace_id: "4bf92f3577b34da6"
+
+  schemas:
+    StolenVehicle:
+      type: object
+      required:
+        - plate
+        - plate_normalized
+        - country_code
+        - status
+        - schema_version
+        - created_at
+      properties:
+        plate:
+          type: string
+          description: Matrícula tal como fue registrada.
+          example: "ABC-123"
+        plate_normalized:
+          type: string
+          description: Matrícula normalizada (mayúsculas, sin guiones).
+          example: "ABC123"
+        country_code:
+          type: string
+          description: Tenant (ISO 3166-1 alpha-2). Del JWT, no del body.
+          example: "CO"
+        theft_date:
+          type: ["string", "null"]
+          format: date
+          example: "2026-04-28"
+        theft_location:
+          type: ["string", "null"]
+          example: "Carrera 15 # 93-47, Chapinero, Bogotá"
+        brand:
+          type: ["string", "null"]
+          description: Marca del vehículo.
+          example: "Chevrolet"
+        vehicle_class:
+          type: ["string", "null"]
+          description: Clase del vehículo.
+          example: "automóvil"
+        line:
+          type: ["string", "null"]
+          description: Línea o modelo.
+          example: "Tracker"
+        color:
+          type: ["string", "null"]
+          example: "Rojo"
+        model_year:
+          type: ["integer", "null"]
+          example: 2019
+        status:
+          type: string
+          enum: ["stolen", "recovered", "cancelled"]
+          example: "stolen"
+        schema_version:
+          type: integer
+          description: Versión del schema canónico. Se incrementa en cada PATCH.
+          example: 2
+        source:
+          type: string
+          description: "Origen: manual_admin o country_adapter_{cc}."
+          example: "manual_admin"
+        extensions:
+          type: ["object", "null"]
+          additionalProperties: true
+          description: Campos adicionales por país (JSONB).
+          example:
+            soat_number: "CO-SOAT-2026-XYZ789"
+            internal_case_id: "BOG-2026-04521"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-04-28T10:15:00.000Z"
+        updated_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-02T08:30:00.000Z"
+
+    VehiclesListResponse:
+      type: object
+      required:
+        - data
+        - total
+        - page
+        - page_size
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StolenVehicle"
+        total:
+          type: integer
+          example: 1847
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+
+    CreateVehicleRequest:
+      type: object
+      required:
+        - plate
+        - theft_date
+        - brand
+        - vehicle_class
+      properties:
+        plate:
+          type: string
+          description: Matrícula del vehículo.
+          example: "XYZ-789"
+        theft_date:
+          type: string
+          format: date
+          example: "2026-05-13"
+        theft_location:
+          type: ["string", "null"]
+          example: "Autopista Norte km 15, Bogotá"
+        owner_dni:
+          type: ["string", "null"]
+          description: |
+            DNI del propietario en texto plano. Se almacena como HMAC-SHA256 con sal por país.
+            Nunca aparece en ninguna respuesta ni log.
+          example: "79012345"
+          writeOnly: true
+        brand:
+          type: string
+          example: "Toyota"
+        vehicle_class:
+          type: string
+          example: "automóvil"
+        line:
+          type: ["string", "null"]
+          example: "Corolla"
+        color:
+          type: ["string", "null"]
+          example: "Blanco"
+        model_year:
+          type: ["integer", "null"]
+          example: 2022
+        extensions:
+          type: ["object", "null"]
+          additionalProperties: true
+          example:
+            soat_number: "CO-SOAT-2026-XYZ789"
+
+    VehiclePatch:
+      type: object
+      description: Campos actualizables. Solo se aplican los campos presentes.
+      properties:
+        status:
+          type: ["string", "null"]
+          enum: ["stolen", "recovered", "cancelled"]
+          example: "recovered"
+        theft_location:
+          type: ["string", "null"]
+        brand:
+          type: ["string", "null"]
+        vehicle_class:
+          type: ["string", "null"]
+        line:
+          type: ["string", "null"]
+        color:
+          type: ["string", "null"]
+        model_year:
+          type: ["integer", "null"]
+        extensions:
+          type: ["object", "null"]
+          additionalProperties: true
+          description: |
+            Se hace merge con los extensions existentes (no reemplazo total).
+          example:
+            recovery_date: "2026-05-13"
+            recovery_notes: "Recuperado por patrulla BOG-N-042."
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          example: "plate_already_exists"
+        message:
+          type: string
+          example: "La matrícula ya está registrada."
+        trace_id:
+          type: string
+          example: "4bf92f3577b34da6"

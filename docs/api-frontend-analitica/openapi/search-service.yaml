@@ -1,0 +1,398 @@
+openapi: "3.1.0"
+info:
+  title: search-service API
+  version: "1.0.0"
+  description: |
+    Servicio de búsqueda de eventos de avistamiento de matrículas.
+    Orquesta OpenSearch + PostgreSQL+PostGIS + Object Storage presigned URLs.
+    Referencia: docs/api-frontend-analitica/search-service.md
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /plates/{plate}/events:
+    get:
+      summary: Obtener eventos de avistamiento por matrícula
+      description: |
+        Retorna la lista paginada de eventos de avistamiento de un vehículo identificado
+        por su matrícula. Combina búsqueda en OpenSearch (fuzzy+exacta) con datos de
+        PostgreSQL+PostGIS y genera presigned URLs de thumbnails con TTL 5 min.
+      operationId: getPlateEvents
+      tags:
+        - search
+      parameters:
+        - name: plate
+          in: path
+          required: true
+          description: |
+            Matrícula a buscar. Se normaliza internamente (mayúsculas, sin guiones).
+            Ejemplos: ABC123, ABC-123, XYZ-789.
+          schema:
+            type: string
+            pattern: "^[A-Za-z0-9-]{3,10}$"
+            example: "ABC-123"
+        - name: from
+          in: query
+          required: false
+          description: "Inicio del rango de fechas (ISO 8601 UTC). Default: 30 días atrás."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-01T00:00:00Z"
+        - name: to
+          in: query
+          required: false
+          description: "Fin del rango de fechas (ISO 8601 UTC). Default: ahora."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-13T23:59:59Z"
+        - name: country
+          in: query
+          required: false
+          description: |
+            Override de country_code. Solo role=admin puede especificar
+            un país distinto al del token JWT.
+          schema:
+            type: string
+            pattern: "^[A-Z]{2}$"
+            example: "CO"
+        - name: device_id
+          in: query
+          required: false
+          description: Filtrar por dispositivo específico.
+          schema:
+            type: string
+            example: "dev-bog-norte-042"
+        - name: min_confidence
+          in: query
+          required: false
+          description: "Confianza mínima del ANPR (0.0–1.0). Default: 0.6."
+          schema:
+            type: number
+            format: float
+            minimum: 0.0
+            maximum: 1.0
+            default: 0.6
+        - name: limit
+          in: query
+          required: false
+          description: "Elementos por página. Default: 20. Máximo: 100."
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          description: "Desplazamiento para paginación. Default: 0."
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Lista paginada de eventos de avistamiento.
+          headers:
+            X-Trace-ID:
+              description: OpenTelemetry trace ID para diagnóstico.
+              schema:
+                type: string
+            X-SLO-Degraded:
+              description: |
+                Presente y con valor "true" cuando la respuesta superó el SLO de 800 ms
+                (mapa con alto volumen de eventos). El cliente debe mostrar un indicador
+                de degradación en la UI.
+              schema:
+                type: string
+                enum: ["true"]
+            X-SLO-Degraded-Reason:
+              description: Razón de la degradación. Valor posible: "map_event_threshold_exceeded".
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlateEventsResponse"
+              examples:
+                colombia_example:
+                  summary: Ejemplo Colombia — placa ABC123
+                  value:
+                    data:
+                      - event_id: "evt-2026-05-13-co-abc123-004"
+                        plate: "ABC-123"
+                        plate_normalized: "ABC123"
+                        timestamp: "2026-05-13T14:32:07.123Z"
+                        lat: 4.710989
+                        lon: -74.072092
+                        device_id: "dev-bog-norte-042"
+                        confidence: 0.94
+                        thumbnail_url: "https://minio.anti-hurto.internal/thumbnails/2026/05/13/abc123-004.jpg?X-Amz-Expires=300&X-Amz-Signature=abc123xyz"
+                        thumbnail_expires_at: "2026-05-13T14:37:07.123Z"
+                        country: "CO"
+                        city: "Bogotá"
+                        address: "Calle 72 # 11-23, Chapinero, Bogotá"
+                        is_stolen: true
+                        incident_id: "inc-abc123-2026-05"
+                    total: 47
+                    page: 1
+                    page_size: 20
+                    pages: 3
+                    plate: "ABC123"
+                    query_time_ms: 187
+        "400":
+          description: Parámetros inválidos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_plate:
+                  value:
+                    error: "invalid_plate_format"
+                    message: "La matrícula proporcionada no tiene un formato reconocible."
+                    trace_id: "4bf92f3577b34da6"
+                invalid_date_range:
+                  value:
+                    error: "invalid_date_range"
+                    message: "El rango de fechas es inválido: from debe ser anterior a to y el rango no puede superar 365 días."
+                    trace_id: "4bf92f3577b34da6"
+        "401":
+          description: No autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "unauthorized"
+                message: "JWT ausente, inválido o expirado."
+                trace_id: "4bf92f3577b34da6"
+        "403":
+          description: No autorizado para el país solicitado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "forbidden_country"
+                message: "No tiene acceso a datos del país solicitado."
+                trace_id: "4bf92f3577b34da6"
+        "404":
+          description: |
+            La matrícula no tiene ningún evento registrado en el sistema para el país dado.
+            Se retorna cuando OpenSearch devuelve 0 resultados en la consulta inicial (offset=0).
+            Distinción: si la placa existe pero no hay eventos en el rango de fechas/filtros
+            aplicados con offset > 0 (paginación avanzada), se retorna 200 con data=[].
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "plate_not_found"
+                plate: "ABC123"
+                country: "CO"
+                message: "No se encontraron eventos para la matrícula ABC123 en el país CO en el rango de fechas especificado."
+                trace_id: "4bf92f3577b34da6"
+        "429":
+          description: Rate limit excedido.
+          headers:
+            Retry-After:
+              description: Segundos hasta que el rate limit se reinicia.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "rate_limit_exceeded"
+                message: "API rate limit exceeded. See Retry-After header."
+                trace_id: "4bf92f3577b34da6"
+        "503":
+          description: Servicio no disponible (circuit breaker abierto).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "index_unavailable"
+                message: "OpenSearch o PostgreSQL no disponibles temporalmente. Intente de nuevo en unos momentos."
+                trace_id: "4bf92f3577b34da6"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT emitido por Keycloak (RS256). Claims requeridos: sub, country_code, role, zone, exp.
+        El API Gateway (Kong) valida el JWT y propaga los claims como headers X-Country-Code,
+        X-Role, X-Zone al microservicio.
+
+  schemas:
+    PlateEvent:
+      type: object
+      required:
+        - event_id
+        - plate
+        - plate_normalized
+        - timestamp
+        - lat
+        - lon
+        - device_id
+        - confidence
+        - country
+        - is_stolen
+      properties:
+        event_id:
+          type: string
+          description: "Identificador único del evento. Formato: evt-{YYYY-MM-DD}-{cc}-{plate}-{seq}."
+          example: "evt-2026-05-13-co-abc123-004"
+        plate:
+          type: string
+          description: Matrícula tal como fue detectada por el ANPR.
+          example: "ABC-123"
+        plate_normalized:
+          type: string
+          description: Matrícula normalizada (mayúsculas, sin guiones).
+          example: "ABC123"
+        timestamp:
+          type: string
+          format: date-time
+          description: Timestamp de captura del evento (UTC, ISO 8601).
+          example: "2026-05-13T14:32:07.123Z"
+        lat:
+          type: number
+          format: double
+          description: Latitud en grados decimales (WGS84).
+          example: 4.710989
+        lon:
+          type: number
+          format: double
+          description: Longitud en grados decimales (WGS84).
+          example: -74.072092
+        device_id:
+          type: string
+          description: Identificador del dispositivo captura.
+          example: "dev-bog-norte-042"
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confianza del ANPR (0.0–1.0).
+          example: 0.94
+        thumbnail_url:
+          type: ["string", "null"]
+          format: uri
+          description: |
+            URL pre-firmada del thumbnail del vehículo (TTL 5 min desde la generación).
+            Nulo si la imagen no está disponible (circuit breaker de Object Storage abierto).
+          example: "https://minio.anti-hurto.internal/thumbnails/2026/05/13/abc123-004.jpg?X-Amz-Expires=300&X-Amz-Signature=abc123xyz"
+        thumbnail_expires_at:
+          type: ["string", "null"]
+          format: date-time
+          description: Timestamp de expiración de la URL pre-firmada.
+          example: "2026-05-13T14:37:07.123Z"
+        country:
+          type: string
+          description: country_code del tenant (ISO 3166-1 alpha-2).
+          example: "CO"
+        city:
+          type: ["string", "null"]
+          description: Ciudad geocodificada del evento.
+          example: "Bogotá"
+        address:
+          type: ["string", "null"]
+          description: Dirección aproximada geocodificada.
+          example: "Calle 72 # 11-23, Chapinero, Bogotá"
+        is_stolen:
+          type: boolean
+          description: true si el vehículo está en la lista de hurtados al momento de la consulta.
+          example: true
+        incident_id:
+          type: ["string", "null"]
+          description: ID del incidente activo asociado. Nulo si no hay incidente.
+          example: "inc-abc123-2026-05"
+
+    PlateEventsResponse:
+      type: object
+      required:
+        - data
+        - total
+        - page
+        - page_size
+        - pages
+        - plate
+        - query_time_ms
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlateEvent"
+          description: Lista de eventos de avistamiento ordenados por timestamp DESC.
+        total:
+          type: integer
+          description: Total de eventos encontrados (antes de paginar).
+          example: 47
+        page:
+          type: integer
+          description: Página actual (1-based).
+          example: 1
+        page_size:
+          type: integer
+          description: Elementos por página solicitados.
+          example: 20
+        pages:
+          type: integer
+          description: Total de páginas disponibles.
+          example: 3
+        plate:
+          type: string
+          description: Matrícula normalizada que se consultó.
+          example: "ABC123"
+        query_time_ms:
+          type: integer
+          description: Tiempo de procesamiento de la consulta en milisegundos.
+          example: 187
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          description: Código de error machine-readable.
+          example: "invalid_plate_format"
+        message:
+          type: string
+          description: Descripción legible del error.
+          example: "La matrícula proporcionada no tiene un formato reconocible."
+        trace_id:
+          type: string
+          description: OpenTelemetry trace ID para diagnóstico y correlación de logs.
+          example: "4bf92f3577b34da6"
+        plate:
+          type: string
+          description: Matrícula consultada (presente solo en errores plate_not_found).
+          example: "ABC123"
+        country:
+          type: string
+          description: country_code consultado (presente solo en errores plate_not_found).
+          example: "CO"
+        details:
+          type: ["object", "null"]
+          description: Detalles adicionales del error (opcional).
+          additionalProperties: true

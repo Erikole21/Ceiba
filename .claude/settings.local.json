@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(refacil-sdd-ai *)",
+      "PowerShell(Get-ChildItem *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(npx markdownlint-cli *)",
+      "Bash(Get-ChildItem C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\almacenamiento-lectura *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\identidad-seguridad\\\\helm\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\identidad-seguridad\\\\terraform\")",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(powershell -Command \"Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'\")",
+      "Bash(refacil-sdd-ai sdd *)",
+      "Bash(ls refacil-sdd/changes/identidad-seguridad/.review-last-fails.json)",
+      "Bash(dir \"refacil-sdd\\\\changes\\\\api-frontend-analitica\\\\\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\api-frontend-analitica\\\\openapi\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\api-frontend-analitica\\\\helm\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\api-frontend-analitica\\\\terraform\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\api-frontend-analitica\" -Recurse -Name)",
+      "Bash(Sort-Object)",
+      "Bash(python3 *)",
+      "Bash(npx refacil-sdd-ai *)",
+      "Bash(Get-ChildItem \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\backbone-procesamiento\" -Recurse -File)",
+      "Bash(Select-Object FullName, Length)",
+      "Bash(Sort-Object FullName)",
+      "Bash(dir \"refacil-sdd\\\\changes\\\\backbone-procesamiento\")"
+    ]
+  }
+}

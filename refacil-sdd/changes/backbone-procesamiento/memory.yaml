@@ -1,0 +1,19 @@
+lastStep: apply
+touchedFiles:
+  - docs/backbone-procesamiento/overview.md
+  - docs/backbone-procesamiento/kafka-topics.md
+  - docs/backbone-procesamiento/adr-geocoding-strategy.md
+  - docs/backbone-procesamiento/adr-matcher-fallback.md
+  - docs/backbone-procesamiento/postgresql-schema.md
+  - docs/backbone-procesamiento/opensearch-schema.md
+  - docs/backbone-procesamiento/deduplicator.md
+  - docs/backbone-procesamiento/enrichment-service.md
+  - docs/backbone-procesamiento/matcher-service.md
+  - docs/backbone-procesamiento/alert-service.md
+  - docs/backbone-procesamiento/websocket-gateway.md
+  - docs/backbone-procesamiento/incident-service.md
+  - docs/backbone-procesamiento/debezium-cdc.md
+  - docs/backbone-procesamiento/slo-observability.md
+  - docs/backbone-procesamiento/helm/README.md
+  - docs/backbone-procesamiento/terraform/README.md
+  - docs/propuesta-arquitectura-hurto-vehiculos.md

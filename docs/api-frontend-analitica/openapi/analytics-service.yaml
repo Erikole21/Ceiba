@@ -1,0 +1,576 @@
+openapi: "3.1.0"
+info:
+  title: analytics-service API
+  version: "1.0.0"
+  description: |
+    Servicio de analítica sobre ClickHouse. Expone heatmaps H3, tendencias de hurto
+    y rutas de escape frecuentes. Incluye detección de staleness en vistas materializadas.
+    Referencia: docs/api-frontend-analitica/analytics-service.md
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /analytics/heatmap:
+    get:
+      summary: Heatmap H3 de densidad de hurtos
+      description: |
+        Retorna densidad de eventos de hurto agrupados por celda hexagonal H3
+        (resolución 8 por defecto, ~0.74 km²).
+
+        Cuando las vistas materializadas de ClickHouse tienen un lag > 60 minutos,
+        la respuesta incluye el header `X-SLO-Degraded: true` y el campo
+        `data_freshness_warning` con información del lag.
+      operationId: getHeatmap
+      tags:
+        - analytics
+      parameters:
+        - name: country
+          in: query
+          required: true
+          description: country_code del tenant.
+          schema:
+            type: string
+            pattern: "^[A-Z]{2}$"
+            example: "CO"
+        - name: from
+          in: query
+          required: false
+          description: "Inicio del rango. Default: 7 días atrás."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-06T00:00:00Z"
+        - name: to
+          in: query
+          required: false
+          description: "Fin del rango. Default: ahora."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-13T23:59:59Z"
+        - name: city
+          in: query
+          required: false
+          description: Filtrar por ciudad específica.
+          schema:
+            type: string
+            example: "Bogotá"
+        - name: min_events
+          in: query
+          required: false
+          description: "Umbral mínimo de eventos para incluir la celda. Default: 1."
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: resolution
+          in: query
+          required: false
+          description: "Resolución H3 (7–9). Default: 8."
+          schema:
+            type: integer
+            minimum: 7
+            maximum: 9
+            default: 8
+      responses:
+        "200":
+          description: Heatmap H3 generado exitosamente.
+          headers:
+            X-Trace-ID:
+              description: OpenTelemetry trace ID.
+              schema:
+                type: string
+            X-SLO-Degraded:
+              description: |
+                Presente con valor "true" cuando el lag de las vistas materializadas
+                supera 60 minutos. Los datos se sirven de todas formas (best-effort).
+              schema:
+                type: string
+                enum: ["true"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeatmapResponse"
+              example:
+                data:
+                  - h3_index: "88193ad9d3fffff"
+                    event_count: 47
+                    avg_confidence: 0.891
+                    lat_centroid: 4.710989
+                    lon_centroid: -74.072092
+                    city: "Bogotá"
+                  - h3_index: "88193ad9dbfffff"
+                    event_count: 31
+                    avg_confidence: 0.875
+                    lat_centroid: 4.695412
+                    lon_centroid: -74.083201
+                    city: "Bogotá"
+                total_cells: 142
+                total_events: 3847
+                country: "CO"
+                from: "2026-05-06T00:00:00Z"
+                to: "2026-05-13T23:59:59Z"
+                query_time_ms: 1240
+                data_freshness_warning: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /analytics/trends:
+    get:
+      summary: Tendencias diarias de hurto
+      description: |
+        Retorna el conteo de hurtos por día (u otra granularidad) para el rango dado.
+      operationId: getTrends
+      tags:
+        - analytics
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: "^[A-Z]{2}$"
+            example: "CO"
+        - name: from
+          in: query
+          required: false
+          description: "Default: 30 días atrás."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-04-13T00:00:00Z"
+        - name: to
+          in: query
+          required: false
+          description: "Default: ahora."
+          schema:
+            type: string
+            format: date-time
+            example: "2026-05-13T23:59:59Z"
+        - name: city
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "Bogotá"
+        - name: granularity
+          in: query
+          required: false
+          description: "Granularidad temporal. Default: day."
+          schema:
+            type: string
+            enum: ["day", "week", "month"]
+            default: "day"
+      responses:
+        "200":
+          description: Tendencias calculadas exitosamente.
+          headers:
+            X-Trace-ID:
+              schema:
+                type: string
+            X-SLO-Degraded:
+              schema:
+                type: string
+                enum: ["true"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrendsResponse"
+              example:
+                data:
+                  - date: "2026-05-13"
+                    theft_count: 23
+                    city: "Bogotá"
+                  - date: "2026-05-12"
+                    theft_count: 18
+                    city: "Bogotá"
+                total_period: 412
+                country: "CO"
+                granularity: "day"
+                from: "2026-04-13"
+                to: "2026-05-13"
+                query_time_ms: 892
+                data_freshness_warning: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /analytics/routes:
+    get:
+      summary: Rutas de escape frecuentes
+      description: |
+        Retorna las secuencias de celdas H3 más recurrentes de vehículos hurtados,
+        identificando posibles rutas de escape.
+      operationId: getRoutes
+      tags:
+        - analytics
+      parameters:
+        - name: country
+          in: query
+          required: true
+          schema:
+            type: string
+            example: "CO"
+        - name: from
+          in: query
+          required: false
+          description: "Default: 30 días atrás."
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: city
+          in: query
+          required: false
+          schema:
+            type: string
+            example: "Bogotá"
+        - name: min_frequency
+          in: query
+          required: false
+          description: "Frecuencia mínima de la ruta. Default: 3."
+          schema:
+            type: integer
+            minimum: 2
+            default: 3
+        - name: max_routes
+          in: query
+          required: false
+          description: "Máximo de rutas a retornar. Default: 10."
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        "200":
+          description: Rutas calculadas exitosamente.
+          headers:
+            X-Trace-ID:
+              schema:
+                type: string
+            X-SLO-Degraded:
+              schema:
+                type: string
+                enum: ["true"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutesResponse"
+              example:
+                data:
+                  - route_id: "route-co-bog-001"
+                    segment_sequence:
+                      - order: 1
+                        h3_index: "88193ad9d3fffff"
+                        lat: 4.710989
+                        lon: -74.072092
+                        avg_time_in_cell_minutes: 4.2
+                      - order: 2
+                        h3_index: "88193ad9dbfffff"
+                        lat: 4.695412
+                        lon: -74.083201
+                        avg_time_in_cell_minutes: 2.8
+                    frequency: 12
+                    avg_total_duration_minutes: 22.5
+                    city: "Bogotá"
+                total_routes: 8
+                country: "CO"
+                query_time_ms: 2340
+                data_freshness_warning: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: JWT ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "unauthorized"
+            message: "JWT ausente, inválido o expirado."
+            trace_id: "4bf92f3577b34da6"
+    Forbidden:
+      description: No autorizado para el recurso.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    DataFreshnessWarning:
+      type: ["object", "null"]
+      description: Información de staleness de las vistas materializadas. Nulo si los datos están frescos.
+      properties:
+        last_updated_at:
+          type: string
+          format: date-time
+          example: "2026-05-13T13:00:00Z"
+        lag_minutes:
+          type: integer
+          example: 92
+        message:
+          type: string
+          example: "Los datos pueden estar desactualizados. Última actualización hace 92 minutos."
+
+    HeatmapCell:
+      type: object
+      required:
+        - h3_index
+        - event_count
+        - avg_confidence
+        - lat_centroid
+        - lon_centroid
+      properties:
+        h3_index:
+          type: string
+          description: Índice H3 de la celda hexagonal.
+          example: "88193ad9d3fffff"
+        event_count:
+          type: integer
+          description: Número de eventos de hurto en la celda en el período.
+          example: 47
+        avg_confidence:
+          type: number
+          format: float
+          description: Confianza promedio ANPR de los eventos en la celda.
+          example: 0.891
+        lat_centroid:
+          type: number
+          format: double
+          description: Latitud del centroide de la celda.
+          example: 4.710989
+        lon_centroid:
+          type: number
+          format: double
+          description: Longitud del centroide de la celda.
+          example: -74.072092
+        city:
+          type: ["string", "null"]
+          example: "Bogotá"
+
+    HeatmapResponse:
+      type: object
+      required:
+        - data
+        - total_cells
+        - total_events
+        - country
+        - query_time_ms
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/HeatmapCell"
+        total_cells:
+          type: integer
+          example: 142
+        total_events:
+          type: integer
+          example: 3847
+        country:
+          type: string
+          example: "CO"
+        from:
+          type: string
+          format: date-time
+          example: "2026-05-06T00:00:00Z"
+        to:
+          type: string
+          format: date-time
+          example: "2026-05-13T23:59:59Z"
+        query_time_ms:
+          type: integer
+          example: 1240
+        data_freshness_warning:
+          $ref: "#/components/schemas/DataFreshnessWarning"
+
+    TrendPoint:
+      type: object
+      required:
+        - date
+        - theft_count
+      properties:
+        date:
+          type: string
+          description: Fecha o período según la granularidad (YYYY-MM-DD para day).
+          example: "2026-05-13"
+        theft_count:
+          type: integer
+          description: Número de hurtos en el período.
+          example: 23
+        city:
+          type: ["string", "null"]
+          example: "Bogotá"
+
+    TrendsResponse:
+      type: object
+      required:
+        - data
+        - total_period
+        - country
+        - query_time_ms
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrendPoint"
+        total_period:
+          type: integer
+          description: Total acumulado en el período.
+          example: 412
+        country:
+          type: string
+          example: "CO"
+        granularity:
+          type: string
+          enum: ["day", "week", "month"]
+          example: "day"
+        from:
+          type: string
+          example: "2026-04-13"
+        to:
+          type: string
+          example: "2026-05-13"
+        query_time_ms:
+          type: integer
+          example: 892
+        data_freshness_warning:
+          $ref: "#/components/schemas/DataFreshnessWarning"
+
+    RouteSegment:
+      type: object
+      required:
+        - order
+        - h3_index
+        - lat
+        - lon
+      properties:
+        order:
+          type: integer
+          description: Posición del segmento en la secuencia de la ruta.
+          example: 1
+        h3_index:
+          type: string
+          description: Índice H3 del segmento.
+          example: "88193ad9d3fffff"
+        lat:
+          type: number
+          format: double
+          description: Latitud del centroide del segmento.
+          example: 4.710989
+        lon:
+          type: number
+          format: double
+          description: Longitud del centroide del segmento.
+          example: -74.072092
+        avg_time_in_cell_minutes:
+          type: ["number", "null"]
+          format: float
+          description: Tiempo promedio en la celda en minutos.
+          example: 4.2
+
+    Route:
+      type: object
+      required:
+        - route_id
+        - segment_sequence
+        - frequency
+      properties:
+        route_id:
+          type: string
+          example: "route-co-bog-001"
+        segment_sequence:
+          type: array
+          items:
+            $ref: "#/components/schemas/RouteSegment"
+        frequency:
+          type: integer
+          description: Número de veces que esta secuencia aparece en el período.
+          example: 12
+        avg_total_duration_minutes:
+          type: ["number", "null"]
+          format: float
+          example: 22.5
+        city:
+          type: ["string", "null"]
+          example: "Bogotá"
+
+    RoutesResponse:
+      type: object
+      required:
+        - data
+        - total_routes
+        - country
+        - query_time_ms
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Route"
+        total_routes:
+          type: integer
+          example: 8
+        country:
+          type: string
+          example: "CO"
+        query_time_ms:
+          type: integer
+          example: 2340
+        data_freshness_warning:
+          $ref: "#/components/schemas/DataFreshnessWarning"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          example: "invalid_date_range"
+        message:
+          type: string
+          example: "El rango de fechas es inválido."
+        trace_id:
+          type: string
+          example: "4bf92f3577b34da6"

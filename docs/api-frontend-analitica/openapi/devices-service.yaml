@@ -1,0 +1,479 @@
+openapi: "3.1.0"
+info:
+  title: devices-service API
+  version: "1.0.0"
+  description: |
+    CRUD de dispositivos de captura con soporte de OTA asíncrono.
+    Aislamiento multi-tenant por country_code del JWT.
+    Referencia: docs/api-frontend-analitica/devices-service.md
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /devices:
+    get:
+      summary: Listar dispositivos del tenant
+      description: Retorna la lista paginada de dispositivos del country_code del token JWT.
+      operationId: listDevices
+      tags:
+        - devices
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filtrar por estado del dispositivo.
+          schema:
+            type: string
+            enum: ["active", "inactive", "pending_registration", "pending_ota", "error"]
+        - name: zone
+          in: query
+          required: false
+          description: Filtrar por zona policial.
+          schema:
+            type: string
+            example: "BOG-NORTE"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Lista de dispositivos.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevicesListResponse"
+              example:
+                data:
+                  - device_id: "dev-co-bog-norte-042"
+                    country_code: "CO"
+                    serial_number: "SN-20240315-042"
+                    location_name: "Calle 72 con Carrera 11, Chapinero, Bogotá"
+                    lat: 4.710989
+                    lon: -74.072092
+                    zone: "BOG-NORTE"
+                    status: "active"
+                    firmware_version: "2.4.1"
+                    last_seen_at: "2026-05-13T14:30:00.000Z"
+                    last_event_at: "2026-05-13T14:28:45.000Z"
+                    anpr_model: "Hikvision-DS-MH1823-1"
+                    connectivity: "gsm_4g"
+                    battery_level: 87
+                    created_at: "2024-03-15T09:00:00.000Z"
+                    updated_at: "2026-05-13T14:30:00.000Z"
+                total: 342
+                page: 1
+                page_size: 20
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+    post:
+      summary: Registrar nuevo dispositivo
+      description: |
+        Registra un nuevo dispositivo de captura. El dispositivo queda en estado
+        pending_registration hasta que el agente edge complete el bootstrap PKI.
+        Roles permitidos: admin.
+      operationId: createDevice
+      tags:
+        - devices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeviceRequest"
+            example:
+              serial_number: "SN-20260513-099"
+              location_name: "Autopista Norte con Calle 183, Usaquén, Bogotá"
+              lat: 4.748921
+              lon: -74.045832
+              zone: "BOG-NORTE"
+              anpr_model: "Hikvision-DS-MH1823-1"
+              connectivity: "gsm_4g"
+      responses:
+        "201":
+          description: Dispositivo registrado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+              example:
+                device_id: "dev-co-bog-norte-099"
+                country_code: "CO"
+                status: "pending_registration"
+                created_at: "2026-05-13T14:40:00.000Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /devices/{id}:
+    get:
+      summary: Obtener detalles de un dispositivo
+      description: Retorna los detalles completos incluido historial OTA.
+      operationId: getDevice
+      tags:
+        - devices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del dispositivo.
+          schema:
+            type: string
+            example: "dev-co-bog-norte-042"
+      responses:
+        "200":
+          description: Detalles del dispositivo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /devices/{id}/ota:
+    post:
+      summary: Disparar actualización OTA
+      description: |
+        Solicita una actualización de firmware OTA de forma asíncrona.
+        El dispositivo cambia a estado pending_ota. El agente edge recibe la instrucción
+        vía MQTT topic retained. Retorna 202 Accepted.
+        Roles permitidos: admin.
+      operationId: triggerOta
+      tags:
+        - devices
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID del dispositivo.
+          schema:
+            type: string
+            example: "dev-co-bog-norte-042"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OtaRequest"
+            example:
+              target_version: "2.5.0"
+              notes: "Actualización de seguridad: parche CVE-2026-1234"
+      responses:
+        "202":
+          description: OTA programada. El proceso ocurre de forma asíncrona.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OtaResponse"
+              example:
+                ota_id: "ota-dev-co-bog-norte-042-002"
+                device_id: "dev-co-bog-norte-042"
+                target_version: "2.5.0"
+                status: "pending_ota"
+                requested_at: "2026-05-13T14:42:00.000Z"
+                estimated_completion: "2026-05-13T14:47:00.000Z"
+        "400":
+          description: Versión inválida u OTA ya pendiente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_version:
+                  value:
+                    error: "invalid_version"
+                    message: "La versión 2.5.0 no existe en el repositorio de firmware."
+                    trace_id: "4bf92f3577b34da6"
+                ota_pending:
+                  value:
+                    error: "ota_already_pending"
+                    message: "Ya hay una OTA pendiente para este dispositivo."
+                    trace_id: "4bf92f3577b34da6"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Parámetros inválidos.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: JWT ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: No autorizado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Recurso no encontrado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "device_not_found"
+            message: "El dispositivo especificado no existe."
+            trace_id: "4bf92f3577b34da6"
+
+  schemas:
+    Device:
+      type: object
+      required:
+        - device_id
+        - country_code
+        - status
+        - created_at
+      properties:
+        device_id:
+          type: string
+          description: "Formato: dev-{country_code}-{location}-{seq}."
+          example: "dev-co-bog-norte-042"
+        country_code:
+          type: string
+          example: "CO"
+        serial_number:
+          type: ["string", "null"]
+          example: "SN-20240315-042"
+        location_name:
+          type: ["string", "null"]
+          example: "Calle 72 con Carrera 11, Chapinero, Bogotá"
+        lat:
+          type: ["number", "null"]
+          format: double
+          example: 4.710989
+        lon:
+          type: ["number", "null"]
+          format: double
+          example: -74.072092
+        zone:
+          type: ["string", "null"]
+          example: "BOG-NORTE"
+        status:
+          type: string
+          enum: ["active", "inactive", "pending_registration", "pending_ota", "error"]
+          example: "active"
+        firmware_version:
+          type: ["string", "null"]
+          example: "2.4.1"
+        last_seen_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-13T14:30:00.000Z"
+        last_event_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-13T14:28:45.000Z"
+        anpr_model:
+          type: ["string", "null"]
+          example: "Hikvision-DS-MH1823-1"
+        connectivity:
+          type: ["string", "null"]
+          enum: ["gsm_4g", "gsm_3g", "wifi", "fiber"]
+          example: "gsm_4g"
+        battery_level:
+          type: ["integer", "null"]
+          minimum: 0
+          maximum: 100
+          example: 87
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-03-15T09:00:00.000Z"
+        updated_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-13T14:30:00.000Z"
+
+    OtaHistoryEntry:
+      type: object
+      properties:
+        ota_id:
+          type: string
+          example: "ota-dev-co-bog-norte-042-001"
+        target_version:
+          type: string
+          example: "2.4.1"
+        requested_at:
+          type: string
+          format: date-time
+          example: "2026-04-10T10:00:00Z"
+        completed_at:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-04-10T10:05:30Z"
+        status:
+          type: string
+          enum: ["pending", "in_progress", "completed", "failed"]
+          example: "completed"
+
+    DeviceDetail:
+      allOf:
+        - $ref: "#/components/schemas/Device"
+        - type: object
+          properties:
+            ota_history:
+              type: array
+              items:
+                $ref: "#/components/schemas/OtaHistoryEntry"
+
+    DevicesListResponse:
+      type: object
+      required:
+        - data
+        - total
+        - page
+        - page_size
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+        total:
+          type: integer
+          example: 342
+        page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 20
+
+    CreateDeviceRequest:
+      type: object
+      required:
+        - serial_number
+        - location_name
+        - zone
+      properties:
+        serial_number:
+          type: string
+          example: "SN-20260513-099"
+        location_name:
+          type: string
+          example: "Autopista Norte con Calle 183, Usaquén, Bogotá"
+        lat:
+          type: ["number", "null"]
+          format: double
+          example: 4.748921
+        lon:
+          type: ["number", "null"]
+          format: double
+          example: -74.045832
+        zone:
+          type: string
+          example: "BOG-NORTE"
+        anpr_model:
+          type: ["string", "null"]
+          example: "Hikvision-DS-MH1823-1"
+        connectivity:
+          type: ["string", "null"]
+          enum: ["gsm_4g", "gsm_3g", "wifi", "fiber"]
+          example: "gsm_4g"
+
+    OtaRequest:
+      type: object
+      required:
+        - target_version
+      properties:
+        target_version:
+          type: string
+          description: Versión de firmware destino (semver).
+          example: "2.5.0"
+        notes:
+          type: ["string", "null"]
+          maxLength: 500
+          example: "Actualización de seguridad: parche CVE-2026-1234"
+
+    OtaResponse:
+      type: object
+      required:
+        - ota_id
+        - device_id
+        - target_version
+        - status
+        - requested_at
+      properties:
+        ota_id:
+          type: string
+          example: "ota-dev-co-bog-norte-042-002"
+        device_id:
+          type: string
+          example: "dev-co-bog-norte-042"
+        target_version:
+          type: string
+          example: "2.5.0"
+        status:
+          type: string
+          enum: ["pending_ota"]
+          example: "pending_ota"
+        requested_at:
+          type: string
+          format: date-time
+          example: "2026-05-13T14:42:00.000Z"
+        estimated_completion:
+          type: ["string", "null"]
+          format: date-time
+          example: "2026-05-13T14:47:00.000Z"
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          example: "device_not_found"
+        message:
+          type: string
+          example: "El dispositivo especificado no existe."
+        trace_id:
+          type: string
+          example: "4bf92f3577b34da6"

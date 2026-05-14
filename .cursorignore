@@ -1,0 +1,43 @@
+# Dependencias
+node_modules/
+
+# Build/dist
+dist/
+build/
+.next/
+out/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Cache y temporales
+.cache/
+tmp/
+temp/
+.parcel-cache/
+.turbo/
+
+# Binarios y medios pesados
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.zip
+*.tar.gz
+*.mp4
+*.mp3
+
+# Secretos y credenciales
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Cobertura y reportes
+coverage/
+.nyc_output/

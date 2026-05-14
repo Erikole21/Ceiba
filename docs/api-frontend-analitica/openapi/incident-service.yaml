@@ -1,0 +1,475 @@
+openapi: "3.1.0"
+info:
+  title: incident-service API
+  version: "1.0.0"
+  description: |
+    Gestión del ciclo de vida de la recuperación de vehículos hurtados.
+    Estados: created → dispatched → escalated → recovered → closed.
+    Referencia: docs/api-frontend-analitica/incident-service.md
+  contact:
+    name: Equipo Anti-Hurto
+    email: platform@anti-hurto.internal
+servers:
+  - url: https://api.anti-hurto.internal/v1
+    description: Producción (vía API Gateway Kong)
+
+security:
+  - bearerAuth: []
+
+paths:
+  /incidents/{plate}/recovery-action:
+    post:
+      summary: Crear acción de recuperación para una matrícula
+      description: |
+        Crea un nuevo incidente de recuperación para la matrícula especificada.
+        Roles permitidos: officer, supervisor.
+        Produce el evento Kafka incident.created.
+      operationId: createRecoveryAction
+      tags:
+        - incidents
+      parameters:
+        - name: plate
+          in: path
+          required: true
+          description: Matrícula del vehículo (se normaliza internamente).
+          schema:
+            type: string
+            example: "ABC-123"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecoveryAction"
+            example:
+              action: "dispatch_unit"
+              notes: "Vehículo avistado en Calle 72 con Carrera 11. Se despacha patrulla BOG-N-042."
+              assigned_unit: "PAT-BOG-N-042"
+              location:
+                lat: 4.710989
+                lon: -74.072092
+      responses:
+        "201":
+          description: Incidente creado exitosamente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+              example:
+                incident_id: "inc-abc123-2026-05-042"
+                plate: "ABC123"
+                country_code: "CO"
+                status: "dispatched"
+                created_at: "2026-05-13T14:35:00.000Z"
+                updated_at: "2026-05-13T14:35:00.000Z"
+                created_by: "usr-pol-001"
+                assigned_unit: "PAT-BOG-N-042"
+                notes: "Vehículo avistado en Calle 72 con Carrera 11."
+                audit_entries: []
+        "400":
+          description: Solicitud inválida.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_plate:
+                  value:
+                    error: "invalid_plate_format"
+                    message: "Formato de matrícula no reconocido."
+                    trace_id: "4bf92f3577b34da6"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Rol no permitido o país no autorizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                forbidden_role:
+                  value:
+                    error: "forbidden_role"
+                    message: "El rol analyst no puede crear incidentes."
+                    trace_id: "4bf92f3577b34da6"
+                forbidden_country:
+                  value:
+                    error: "forbidden_country"
+                    message: "El vehículo pertenece a un país distinto al del usuario."
+                    trace_id: "4bf92f3577b34da6"
+        "404":
+          description: Matrícula no encontrada en stolen_vehicles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "plate_not_found"
+                message: "La matrícula XYZ789 no está registrada como vehículo hurtado."
+                trace_id: "4bf92f3577b34da6"
+        "409":
+          description: Ya existe un incidente activo para esta matrícula.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "incident_already_active"
+                message: "Ya existe un incidente activo inc-abc123-2026-05-038 para la matrícula ABC123."
+                trace_id: "4bf92f3577b34da6"
+
+  /incidents/{plate}:
+    get:
+      summary: Obtener incidente activo por matrícula
+      description: |
+        Retorna el incidente activo (o más reciente) para la matrícula especificada,
+        incluyendo el historial de audit entries.
+      operationId: getIncidentByPlate
+      tags:
+        - incidents
+      parameters:
+        - name: plate
+          in: path
+          required: true
+          description: Matrícula del vehículo.
+          schema:
+            type: string
+            example: "ABC-123"
+      responses:
+        "200":
+          description: Incidente encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+              example:
+                incident_id: "inc-abc123-2026-05-042"
+                plate: "ABC123"
+                country_code: "CO"
+                status: "dispatched"
+                created_at: "2026-05-13T14:35:00.000Z"
+                updated_at: "2026-05-13T14:36:30.000Z"
+                created_by: "usr-pol-001"
+                assigned_unit: "PAT-BOG-N-042"
+                notes: "Vehículo avistado en Calle 72 con Carrera 11."
+                audit_entries:
+                  - entry_id: "aud-inc-abc123-001"
+                    incident_id: "inc-abc123-2026-05-042"
+                    action: "status_change"
+                    from_status: "created"
+                    to_status: "dispatched"
+                    actor_id: "usr-pol-001"
+                    actor_role: "officer"
+                    timestamp: "2026-05-13T14:35:00.000Z"
+                    notes: "Despacho de unidad PAT-BOG-N-042"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: Incidente no encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "incident_not_found"
+                message: "No se encontró incidente para la matrícula ABC123."
+                trace_id: "4bf92f3577b34da6"
+
+  /incidents/{id}/status:
+    patch:
+      summary: Actualizar estado de un incidente
+      description: |
+        Actualiza el estado del incidente según las reglas de transición.
+        Roles y transiciones permitidas definidas en incident-service.md §2.
+        Produce el evento Kafka incident.{new_status}.
+      operationId: updateIncidentStatus
+      tags:
+        - incidents
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: "ID del incidente. Formato: inc-{plate}-{YYYY-MM}-{seq}."
+          schema:
+            type: string
+            example: "inc-abc123-2026-05-042"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusUpdate"
+            examples:
+              recover:
+                summary: Marcar como recuperado
+                value:
+                  status: "recovered"
+                  notes: "Vehículo recuperado en Carrera 30 con Calle 80."
+                  recovery_location:
+                    lat: 4.682831
+                    lon: -74.103421
+              close:
+                summary: Cerrar caso
+                value:
+                  status: "closed"
+                  notes: "Caso cerrado oficialmente tras recuperación."
+      responses:
+        "200":
+          description: Estado actualizado exitosamente.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  incident_id:
+                    type: string
+                    example: "inc-abc123-2026-05-042"
+                  plate:
+                    type: string
+                    example: "ABC123"
+                  country_code:
+                    type: string
+                    example: "CO"
+                  status:
+                    type: string
+                    example: "recovered"
+                  updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-05-13T15:10:00.000Z"
+                  country_sync_status:
+                    type: string
+                    enum: ["success", "pending", "unsupported"]
+                    description: Estado del write-back al sistema del país.
+                    example: "pending"
+        "400":
+          description: Transición inválida o parámetros faltantes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                invalid_transition:
+                  value:
+                    error: "invalid_transition"
+                    message: "La transición de created a closed no es válida para el rol officer."
+                    trace_id: "4bf92f3577b34da6"
+                recovery_location_required:
+                  value:
+                    error: "recovery_location_required"
+                    message: "Se requieren coordenadas de recuperación para status=recovered."
+                    trace_id: "4bf92f3577b34da6"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Rol no permitido para esta transición.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "forbidden_transition"
+                message: "El rol officer no puede realizar la transición a escalated."
+                trace_id: "4bf92f3577b34da6"
+        "404":
+          description: Incidente no encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "incident_not_found"
+                message: "El incidente inc-xyz-2026-05-001 no existe."
+                trace_id: "4bf92f3577b34da6"
+        "409":
+          description: Incidente ya cerrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: "incident_already_closed"
+                message: "El incidente inc-abc123-2026-04-030 ya está cerrado."
+                trace_id: "4bf92f3577b34da6"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: JWT ausente, inválido o expirado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: "unauthorized"
+            message: "JWT ausente, inválido o expirado."
+            trace_id: "4bf92f3577b34da6"
+
+  schemas:
+    RecoveryAction:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: ["dispatch_unit", "alert_only"]
+          description: Tipo de acción de recuperación.
+          example: "dispatch_unit"
+        notes:
+          type: ["string", "null"]
+          maxLength: 500
+          description: Notas del oficial.
+          example: "Vehículo avistado en Calle 72 con Carrera 11."
+        assigned_unit:
+          type: ["string", "null"]
+          description: Identificador de la unidad despachada.
+          example: "PAT-BOG-N-042"
+        location:
+          type: ["object", "null"]
+          description: Coordenadas del punto de despacho.
+          properties:
+            lat:
+              type: number
+              format: double
+              example: 4.710989
+            lon:
+              type: number
+              format: double
+              example: -74.072092
+
+    AuditEntry:
+      type: object
+      required:
+        - entry_id
+        - incident_id
+        - action
+        - actor_id
+        - actor_role
+        - timestamp
+      properties:
+        entry_id:
+          type: string
+          example: "aud-inc-abc123-001"
+        incident_id:
+          type: string
+          example: "inc-abc123-2026-05-042"
+        action:
+          type: string
+          example: "status_change"
+        from_status:
+          type: ["string", "null"]
+          example: "created"
+        to_status:
+          type: ["string", "null"]
+          example: "dispatched"
+        actor_id:
+          type: string
+          example: "usr-pol-001"
+        actor_role:
+          type: string
+          example: "officer"
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-05-13T14:35:00.000Z"
+        notes:
+          type: ["string", "null"]
+          example: "Despacho de unidad PAT-BOG-N-042"
+
+    Incident:
+      type: object
+      required:
+        - incident_id
+        - plate
+        - country_code
+        - status
+        - created_at
+        - updated_at
+        - created_by
+      properties:
+        incident_id:
+          type: string
+          description: "Formato: inc-{plate_normalized}-{YYYY-MM}-{seq}."
+          example: "inc-abc123-2026-05-042"
+        plate:
+          type: string
+          example: "ABC123"
+        country_code:
+          type: string
+          example: "CO"
+        status:
+          type: string
+          enum: ["created", "dispatched", "escalated", "recovered", "closed"]
+          example: "dispatched"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-05-13T14:35:00.000Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-05-13T14:36:30.000Z"
+        created_by:
+          type: string
+          example: "usr-pol-001"
+        assigned_unit:
+          type: ["string", "null"]
+          example: "PAT-BOG-N-042"
+        notes:
+          type: ["string", "null"]
+          example: "Vehículo avistado en Calle 72 con Carrera 11."
+        audit_entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+
+    StatusUpdate:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: ["dispatched", "escalated", "recovered", "closed"]
+          description: Nuevo estado del incidente.
+          example: "recovered"
+        notes:
+          type: ["string", "null"]
+          maxLength: 500
+          example: "Vehículo recuperado en Carrera 30 con Calle 80."
+        recovery_location:
+          type: ["object", "null"]
+          description: Obligatorio si status=recovered.
+          properties:
+            lat:
+              type: number
+              format: double
+              example: 4.682831
+            lon:
+              type: number
+              format: double
+              example: -74.103421
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+        - trace_id
+      properties:
+        error:
+          type: string
+          example: "invalid_transition"
+        message:
+          type: string
+          example: "La transición solicitada no es válida."
+        trace_id:
+          type: string
+          example: "4bf92f3577b34da6"
