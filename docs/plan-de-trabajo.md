@@ -12,7 +12,7 @@ Se trabajan **pilar a pilar**: primero se entiende el pilar, se identifican los 
 | 1 | `agente-borde` | 1 · Edge resiliente | Agente Go en el dispositivo: ANPR SPI, SQLite WAL, Bloom filter, MQTT uploader, OTA, watchdog | ✅ Aprobado | ✅ Implementado |
 | 2 | `ingestion-mqtt` | 2 · Comunicación segura | MQTT broker EMQX, Upload Service (URLs pre-firmadas), MinIO/S3, bridge Kafka | ✅ Aprobado | ✅ Implementado |
 | 3 | `backbone-procesamiento` | 6 · Hot/Cold path | Kafka, Deduplicator, Enrichment, Matcher, Alert Service, WebSocket, incident-service | ✅ Aprobado | ✅ Implementado |
-| 4 | `sincronizacion-paises` | 4 · ACL por país | Adapters por país, Canonical Service, modelo canónico versionado, Edge Distribution (delta BF) | ✅ Aprobado | ⏳ Pendiente |
+| 4 | `sincronizacion-paises` | 4 · ACL por país | Adapters por país, Canonical Service, modelo canónico versionado, Edge Distribution (delta BF) | ✅ Aprobado | ✅ Implementado |
 | 5 | `almacenamiento-lectura` | 6 · Hot/Cold path | PostgreSQL+PostGIS, OpenSearch, ClickHouse, Redis | ✅ Aprobado | ✅ Implementado |
 | 6 | `api-frontend-analitica` | 6 · Hot/Cold path | API Gateway, React+MapLibre, search-service, Superset, H3/Kepler.gl | ✅ Aprobado | ✅ Implementado |
 | 7 | `identidad-seguridad` | 5 · Identidad federada | Keycloak (realm por país), PKI propia (Vault), mTLS, multi-tenant | ✅ Aprobado | ✅ Implementado |

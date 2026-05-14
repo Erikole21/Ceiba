@@ -23,7 +23,11 @@
       "Bash(Get-ChildItem \"C:\\\\Users\\\\eriko\\\\Documents\\\\Fuentes\\\\Ceiba\\\\docs\\\\backbone-procesamiento\" -Recurse -File)",
       "Bash(Select-Object FullName, Length)",
       "Bash(Sort-Object FullName)",
-      "Bash(dir \"refacil-sdd\\\\changes\\\\backbone-procesamiento\")"
+      "Bash(dir \"refacil-sdd\\\\changes\\\\backbone-procesamiento\")",
+      "Bash(ls *.md)",
+      "Bash(ls README*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
