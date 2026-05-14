@@ -1,0 +1,9 @@
+{
+  "verdict": "APROBADO CON OBSERVACIONES",
+  "changeName": "sincronizacion-paises",
+  "summary": "Documentación del Pilar 4 (ACL por país) completa y coherente; 4 observaciones MEDIUM/LOW corregidas (Terraform credentials, dedup multi-replica, SLO latencia CDC, BF alert for:)",
+  "failCount": 4,
+  "preexistingCount": 0,
+  "blockers": false,
+  "date": "2026-05-14T02:18:54.289Z"
+}

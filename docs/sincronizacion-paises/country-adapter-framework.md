@@ -298,10 +298,19 @@ Cuando el adaptador pierde conectividad con la fuente policial (CR-03):
 
 1. **Registra el error** en log estructurado con nivel `ERROR`.
 2. **Activa backoff exponencial:** espera inicial 5 s, factor 2, máximo 300 s (5 min).
-3. **Expone la métrica** `adapter.connectivity.failures{country_code, mode}` incrementada.
+3. **Expone la métrica** `adapter_connectivity_failures_total{country_code, mode}` incrementada.
 4. **Preserva el checkpoint** de la última operación exitosa. No avanza el checkpoint hasta reanudar procesamiento exitoso.
 5. **No publica mensajes parciales.** Si el adaptador falló en medio de un lote, descarta el lote incompleto y reintenta desde el checkpoint guardado.
 6. **Alerta operacional:** si el número de intentos fallidos consecutivos supera el umbral configurable (valor de referencia: 5 intentos), activa la alerta `adapter_connectivity_down`.
+
+### 5.1 Incompatibilidad de esquema Avro (CR-04)
+
+Si el producer Avro recibe un rechazo del Schema Registry por incompatibilidad de esquema:
+
+1. El adaptador registra el error con nivel `ERROR`, incluyendo la versión de esquema rechazada.
+2. **Detiene la publicación** de todos los mensajes siguientes inmediatamente.
+3. **No reanuda** hasta que el operador resuelva la incompatibilidad y registre el esquema compatible en el Schema Registry.
+4. No se publica ningún mensaje con esquema no registrado.
 
 ---
 
@@ -349,6 +358,8 @@ El implementador del adaptador solo necesita:
 1. Implementar la lógica de fetch desde la fuente.
 2. Implementar el mapeo de campos propietarios al modelo canónico.
 3. Configurar el campo `extensions_allowed`.
+
+La incorporación de un nuevo país requiere únicamente estos tres pasos — sin modificar el Canonical Vehicles Service, el Edge Distribution Service ni el Schema Registry (CA-13).
 
 ---
 

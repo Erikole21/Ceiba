@@ -54,8 +54,9 @@ graph LR
 ### 2.1 Definición de puertos
 
 ```
+// CanonicalVehicle incluye todos los campos mandatorios, campos de control y el campo extensions (JSONB/map).
 interface VehiclesRepositoryPort {
-    upsert(vehicle: CanonicalVehicle): UpsertResult
+    upsert(vehicle: CanonicalVehicle): UpsertResult  // extensions se persiste en la columna JSONB de canonical_vehicles
     findByKey(country_code: string, plate: string): CanonicalVehicle | null
     findAllStolen(country_code: string): Iterator<{plate: string}>
 }
@@ -122,7 +123,7 @@ sequenceDiagram
         Note over CVS: descartar silenciosamente, incrementar métrica
     end
 
-    CVS->>PG: UPSERT canonical_vehicles (ON CONFLICT DO UPDATE)
+    CVS->>PG: UPSERT canonical_vehicles (ON CONFLICT DO UPDATE)\nincluye extensions JSONB; updated_at = timestamp del evento
     PG-->>CVS: confirmación + updated_at
 
     CVS->>RDS: SET stolen:{cc}:{plate} TTL=30d
@@ -151,8 +152,8 @@ sequenceDiagram
 
     CVS->>PG: SELECT WHERE country_code=$1 AND plate=$2
     alt placa no existe en canonical_vehicles (CR-06)
-        CVS->>CVS: log WARN canonical_vehicles.recovered.not_found
-        CVS->>CVS: incrementar métrica canonical_vehicles.recovered.not_found
+        CVS->>CVS: log WARN canonical_vehicles_recovered_not_found_total
+        CVS->>CVS: incrementar métrica canonical_vehicles_recovered_not_found_total
         Note over CVS: descartar evento; no insertar fila RECOVERED
         Note over CVS: registrar en audit log con estado ORPHAN_RECOVERED
     end
@@ -184,13 +185,22 @@ sequenceDiagram
     end
 
     CVS->>CVS: log INFO reconciliación completada (N registros)
-    CVS->>CVS: incrementar métrica canonical_vehicles.reconciliation.completed
+    CVS->>CVS: incrementar métrica canonical_vehicles_reconciliation_records_total
 ```
 
 La reconciliación puede ejecutarse:
 - Manualmente por el operador mediante un endpoint administrativo.
 - Automáticamente al detectar que Redis responde tras un período de fallo (CR-07).
 - Periódicamente como proceso de auditoría (valor de referencia: cada 24 h, en horario de baja carga).
+
+### 3.4 Aislamiento multi-tenant (CA-12)
+
+El `country_code` actúa como discriminador de tenant en todas las operaciones del servicio:
+
+- **PostgreSQL:** cada consulta y upsert incluye `WHERE country_code = $1`; el índice primario incluye `country_code`.
+- **Redis:** todas las claves tienen el prefijo `stolen:{country_code}:`.
+- **Kafka:** la clave del mensaje en `stolen.vehicles.events` y `stolen.vehicles.canonical` es `{country_code}:{plate}`.
+- **EDS:** `notifyChange(country_code)` acota la regeneración del Bloom filter al país afectado; los datos de otros países no se leen ni modifican.
 
 ---
 
@@ -205,7 +215,7 @@ procedure setHotListWithRetry(country_code, plate, ttl):
             redis.set("stolen:{country_code}:{plate}", "1", EX=ttl)
             return SUCCESS
         catch RedisConnectionError:
-            metrics.increment("canonical_vehicles.redis.failures",
+            metrics.increment("canonical_vehicles_redis_failures_total",
                               labels={country_code: country_code})
             if attempt < max_retries:
                 sleep(base_delay_ms * 2^(attempt-1))  // backoff exponencial
@@ -225,7 +235,9 @@ El servicio mantiene una ventana de deduplicación por `event_id`. Implementaci�
 - **Almacén:** Redis (si disponible) o cache en memoria (fallback, con riesgo de duplicados tras reinicio).
 - **Clave:** `dedup:{event_id}`
 - **TTL:** 24 horas (configurable).
-- **Semántica:** al encontrar `event_id` ya procesado, el mensaje se descarta silenciosamente (sin publicar en DLQ) y se incrementa la métrica `canonical_vehicles.dedup.skipped`.
+- **Semántica:** al encontrar `event_id` ya procesado, el mensaje se descarta silenciosamente (sin publicar en DLQ) y se incrementa la métrica `canonical_vehicles_dedup_skipped_total`.
+
+> **Limitación con `replicaCount > 1`:** el fallback a cache en memoria solo es seguro para despliegues de réplica única. Con múltiples réplicas (ver Helm §2), si una réplica reinicia, su cache in-memory se pierde y puede re-procesar eventos que la otra réplica ya procesó, generando llamadas dobles a `notifyChange` y regeneraciones espurias del Bloom filter. Para `replicaCount > 1`, Redis **debe estar disponible** (la readiness probe ya lo verifica); si Redis no está disponible, el UNIQUE constraint de `event_id` en `canonical_vehicles` (ver `postgresql-schema.md`) actúa como guardia definitivo contra inserciones duplicadas.
 
 ---
 
@@ -233,9 +245,10 @@ El servicio mantiene una ventana de deduplicación por `event_id`. Implementaci�
 
 | Métrica | Tipo | Descripción |
 |---|---|---|
-| `canonical_vehicles_consumer_lag{country_code}` | Gauge | Lag del consumer group en stolen.vehicles.events |
+| `canonical_vehicles_consumer_lag{country_code, partition}` | Gauge | Lag del consumer group en stolen.vehicles.events |
 | `canonical_vehicles_events_processed_total{country_code, status}` | Counter | Total de eventos procesados exitosamente |
 | `canonical_vehicles_events_dlq_total{country_code, error_code}` | Counter | Total de eventos enviados al DLQ |
+| `canonical_vehicles_rejected_invalid_country_total{country_code}` | Counter | Eventos rechazados por `country_code` ausente o no registrado (CR-02) |
 | `canonical_vehicles_upsert_duration_seconds{country_code}` | Histogram | Duración del upsert en PostgreSQL |
 | `canonical_vehicles_redis_failures_total{country_code}` | Counter | Fallos al actualizar Redis |
 | `canonical_vehicles_redis_retries_total{country_code}` | Counter | Reintentos en Redis |

@@ -54,7 +54,7 @@
 
 **Dado** que el Edge Distribution Service detecta un cambio en la lista canónica de placas hurtadas activas para `country_code = "CO"` (alta o baja de placas)
 **Cuando** genera la versión nueva del Bloom filter y calcula el delta respecto a la versión anterior
-**Entonces** publica en el tópico MQTT `countries/CO/bloom-filter` (retained, QoS 1) un payload que incluye: versión nueva del BF, delta binario comprimido, checksum y timestamp; el agente de borde que ya posee la versión anterior puede reconstruir el BF actualizado aplicando el delta sin requerir descarga completa
+**Entonces** publica en el tópico MQTT `countries/CO/bloom-filter` (retained, QoS 1) un payload que incluye: el campo `version_new` con el identificador de la versión nueva del BF, delta binario comprimido, checksum y timestamp; el agente de borde que ya posee la versión anterior puede reconstruir el BF actualizado aplicando el delta sin requerir descarga completa
 
 ## CA-10: Descarga completa del Bloom filter ante versión desactualizada del dispositivo
 
@@ -89,7 +89,7 @@
 ## CA-15: Disponibilidad del Canonical Vehicles Service ante lag de Kafka
 
 **Dado** que el lag de consumo del tópico `stolen.vehicles.events` supera el umbral de alerta configurado (valor de referencia: > 10 000 mensajes no procesados)
-**Cuando** el sistema de monitoreo evalúa la métrica `canonical_vehicles_consumer.lag`
+**Cuando** el sistema de monitoreo evalúa la métrica `canonical_vehicles_consumer_lag`
 **Entonces** se activa una alerta operacional; el servicio continúa procesando mensajes en orden sin pérdida de datos; el SLA de frescura de la lista roja en Redis se ve afectado proporcionalmente al lag acumulado y este impacto queda documentado en las métricas
 
 ---
@@ -104,13 +104,13 @@
 
 **Dado** un mensaje en `stolen.vehicles.events` sin el campo `country_code` o con un valor no registrado en la configuración del sistema
 **Cuando** el Canonical Vehicles Service lo procesa
-**Entonces** el mensaje se redirige a `stolen.vehicles.events.dlq` con el código de error `INVALID_COUNTRY_CODE`; no se modifica ningún dato del sistema; se incrementa la métrica `canonical_vehicles.rejected.invalid_country`
+**Entonces** el mensaje se redirige a `stolen.vehicles.events.dlq` con el código de error `INVALID_COUNTRY_CODE`; no se modifica ningún dato del sistema; se incrementa la métrica `canonical_vehicles_rejected_invalid_country_total`
 
 ## CR-03: Fallo de conectividad del adaptador con la BD policial
 
 **Dado** que un adaptador de país (cualquier modo) pierde la conectividad con la BD policial
 **Cuando** el adaptador intenta ejecutar la siguiente consulta o escuchar el stream CDC
-**Entonces** el adaptador registra el error, activa el mecanismo de reintento con backoff exponencial configurado y expone la métrica `adapter.connectivity.failures`; la última marca de tiempo de sincronización exitosa queda disponible para calcular el retraso acumulado; no se publican mensajes parciales ni corruptos en Kafka
+**Entonces** el adaptador registra el error, activa el mecanismo de reintento con backoff exponencial configurado y expone la métrica `adapter_connectivity_failures_total`; la última marca de tiempo de sincronización exitosa queda disponible para calcular el retraso acumulado; no se publican mensajes parciales ni corruptos en Kafka
 
 ## CR-04: Incompatibilidad de esquema Avro en el Schema Registry
 
@@ -128,13 +128,13 @@
 
 **Dado** que el incident-service produce un evento `RECOVERED` para `plate = "XYZ999"` y `country_code = "CO"`, pero esa placa no existe en la tabla `canonical_vehicles`
 **Cuando** el Canonical Vehicles Service procesa el evento
-**Entonces** el servicio registra una advertencia operacional (`canonical_vehicles.recovered.not_found`), no lanza excepción, no inserta ninguna fila nueva con `status = RECOVERED` y descarta el evento sin modificar Redis ni el BF; el evento se registra en el log de auditoría con estado `ORPHAN_RECOVERED`
+**Entonces** el servicio registra una advertencia operacional (`canonical_vehicles_recovered_not_found_total`), no lanza excepción, no inserta ninguna fila nueva con `status = RECOVERED` y descarta el evento sin modificar Redis ni el BF; el evento se registra en el log de auditoría con estado `ORPHAN_RECOVERED`
 
 ## CR-07: Fallo de Redis durante la actualización de la lista roja
 
 **Dado** que Redis no está disponible cuando el Canonical Vehicles Service intenta actualizar la clave `stolen:{country_code}:{plate}`
 **Cuando** el servicio ejecuta el SET o DEL en Redis
-**Entonces** el servicio registra el fallo, incrementa la métrica `canonical_vehicles.redis.failures`, reintenta con backoff exponencial hasta el número máximo de intentos configurado; el upsert en PostgreSQL ya fue confirmado, por lo que el estado persistente es consistente; al recuperarse Redis, el servicio puede re-sincronizar la lista roja desde `canonical_vehicles` mediante un proceso de reconciliación
+**Entonces** el servicio registra el fallo, incrementa la métrica `canonical_vehicles_redis_failures_total`, reintenta con backoff exponencial hasta el número máximo de intentos configurado; el upsert en PostgreSQL ya fue confirmado, por lo que el estado persistente es consistente; al recuperarse Redis, el servicio puede re-sincronizar la lista roja desde `canonical_vehicles` mediante un proceso de reconciliación
 
 ## CR-08: Soberanía de datos — datos crudos de la BD policial no salen del territorio
 

@@ -56,6 +56,7 @@ El campo `extensions` es un objeto JSON abierto que permite a cada país transmi
 3. **Documentación obligatoria.** Cada país que use `extensions` debe documentar sus campos en su ficha de onboarding (ver [`country-onboarding-guide.md`](./country-onboarding-guide.md)).
 4. **No afecta la versión del esquema.** El uso de nuevas claves en `extensions` no constituye un cambio de versión del esquema Avro. Es un mecanismo de escape controlado.
 5. **Promoción a canónico.** Si un campo de `extensions` resulta ser de utilidad general para múltiples países, puede promoverse a campo canónico en una versión minor o major del esquema (ver [`schema-evolution.md`](./schema-evolution.md)).
+6. **Tamaño máximo.** El payload JSONB de `extensions` no debe exceder **8 KB** por registro. El adaptador debe rechazar y registrar como error cualquier registro que supere este límite antes de publicar en Kafka. Ver [`postgresql-schema.md`](./postgresql-schema.md) para el CHECK constraint correspondiente.
 
 ### 4.2 Ejemplo
 
@@ -101,7 +102,7 @@ El adaptador debe validar antes de serializar y publicar:
 
 Si falla cualquier validación, el adaptador:
 1. Registra el error con nivel `WARN` incluyendo el campo fallido y el valor recibido.
-2. Incrementa la métrica `adapter.validation.failures{country_code, field}`.
+2. Incrementa la métrica `adapter_validation_failures_total{country_code, field}`.
 3. **No publica** el mensaje en Kafka.
 4. Opcionalmente escribe el registro original en el almacén de archivado local para auditoría.
 

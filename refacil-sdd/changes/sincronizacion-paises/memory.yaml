@@ -1,0 +1,7 @@
+lastStep: verify
+touchedFiles:
+  - docs/sincronizacion-paises/canonical-model.md
+  - docs/sincronizacion-paises/canonical-vehicles-service.md
+  - docs/sincronizacion-paises/country-adapter-framework.md
+  - docs/sincronizacion-paises/slo-observability.md
+  - refacil-sdd/changes/sincronizacion-paises/specs.md
